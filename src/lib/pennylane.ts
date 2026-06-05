@@ -60,7 +60,7 @@ export async function fetchLedgerEntries(
     const params: Record<string, string> = {
       date_from: startDate,
       date_to: endDate,
-      limit: "500",
+      limit: "100",
     };
     if (cursor) params["cursor"] = cursor;
 
