@@ -3,6 +3,6 @@ builder = "nixpacks"
 buildCommand = "npm run build"
 
 [deploy]
-startCommand = "npm start"
-healthcheckPath = "/api/pnl"
+startCommand = "npm start -- -p ${PORT:-3000}"
+healthcheckPath = "/"
 restartPolicyType = "on_failure"
