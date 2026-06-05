@@ -1,7 +1,7 @@
 [build]
 builder = "nixpacks"
-buildCommand = "npm run build && cp -r public .next/standalone/dashboard-arkt-conseil/public && cp -r .next/static .next/standalone/dashboard-arkt-conseil/.next/static"
+buildCommand = "npm run build"
 
 [deploy]
-startCommand = "node .next/standalone/dashboard-arkt-conseil/server.js"
+startCommand = "next start"
 restartPolicyType = "on_failure"
