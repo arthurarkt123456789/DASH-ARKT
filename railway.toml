@@ -3,6 +3,6 @@ builder = "nixpacks"
 buildCommand = "npm run build"
 
 [deploy]
-startCommand = "npm start -- -p ${PORT:-3000}"
+startCommand = "npm start"
 healthcheckPath = "/"
 restartPolicyType = "on_failure"
