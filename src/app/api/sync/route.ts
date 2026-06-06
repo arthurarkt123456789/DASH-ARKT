@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchLedgerEntries } from "@/lib/pennylane";
 import { prisma } from "@/lib/db";
+import { ensureSchema } from "@/lib/migrate";
 
 // Exercice fiscal oct→sep
 function getFiscalYears() {
@@ -24,6 +25,7 @@ export async function POST(req: Request) {
     }
   }
 
+  await ensureSchema();
   const log = await prisma.syncLog.create({ data: {} });
 
   try {
