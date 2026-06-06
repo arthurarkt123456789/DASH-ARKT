@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import type { PnLReport, MonthlyPnL } from "@/lib/pennylane";
 
-const BarChart = dynamic(() => import("recharts").then((m) => m.BarChart), { ssr: false });
-const Bar = dynamic(() => import("recharts").then((m) => m.Bar), { ssr: false });
+const LineChart = dynamic(() => import("recharts").then((m) => m.LineChart), { ssr: false });
+const Line = dynamic(() => import("recharts").then((m) => m.Line), { ssr: false });
 const XAxis = dynamic(() => import("recharts").then((m) => m.XAxis), { ssr: false });
 const YAxis = dynamic(() => import("recharts").then((m) => m.YAxis), { ssr: false });
 const Tooltip = dynamic(() => import("recharts").then((m) => m.Tooltip), { ssr: false });
@@ -68,7 +68,6 @@ function SectionHeader({ title }: { title: string }) {
 }
 
 function MonthlyChart({ current, previous }: { current: MonthlyPnL[]; previous: MonthlyPnL[] }) {
-  // Align months to fiscal year position (Oct=1, Sep=12)
   const months = ["10", "11", "12", "01", "02", "03", "04", "05", "06", "07", "08", "09"];
   const monthLabels: Record<string, string> = {
     "01": "Jan", "02": "Fév", "03": "Mar", "04": "Avr", "05": "Mai", "06": "Jun",
@@ -78,32 +77,53 @@ function MonthlyChart({ current, previous }: { current: MonthlyPnL[]; previous: 
   const currentMap = Object.fromEntries(current.map((m) => [m.month.slice(5), m]));
   const previousMap = Object.fromEntries(previous.map((m) => [m.month.slice(5), m]));
 
-  const data = months.map((mm) => ({
-    month: monthLabels[mm],
-    "CA (N)": Math.round(currentMap[mm]?.ca ?? 0),
-    "CA (N-1)": Math.round(previousMap[mm]?.ca ?? 0),
-    "Résultat (N)": Math.round(currentMap[mm]?.resultat_exploitation ?? 0),
-  }));
+  // Cumulative data — stop at last month with CA data
+  let cumCA = 0, cumPersonnel = 0, cumCharges = 0, cumEBE = 0, cumCAN1 = 0;
+  const chartData = months
+    .map((mm) => {
+      const cur = currentMap[mm];
+      const prev = previousMap[mm];
+      if (cur) {
+        cumCA += cur.ca;
+        cumPersonnel += cur.charges_personnel;
+        cumCharges += cur.achats_charges_ext;
+        cumEBE += cur.ebe;
+      }
+      if (prev) cumCAN1 += prev.ca;
+      return {
+        month: monthLabels[mm],
+        hasData: !!cur,
+        "CA cumulé": cur ? Math.round(cumCA) : null,
+        "CA N-1 cumulé": prev ? Math.round(cumCAN1) : null,
+        "Masse salariale": cur ? Math.round(cumPersonnel) : null,
+        "Charges externes": cur ? Math.round(cumCharges) : null,
+        "EBE cumulé": cur ? Math.round(cumEBE) : null,
+      };
+    })
+    .filter((d) => d["CA N-1 cumulé"] !== null || d.hasData);
 
   return (
     <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
-      <h3 className="text-sm font-semibold text-gray-300 mb-4">CA et résultat mensuels</h3>
-      <div style={{ height: 280 }}>
+      <h3 className="text-sm font-semibold text-gray-300 mb-1">Évolution cumulée — exercice en cours</h3>
+      <p className="text-xs text-gray-500 mb-4">CA, masse salariale, charges externes et EBE depuis le début de l&apos;exercice</p>
+      <div style={{ height: 300 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} barGap={2}>
+          <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <XAxis dataKey="month" tick={{ fill: "#6b7280", fontSize: 11 }} axisLine={false} tickLine={false} />
-            <YAxis tickFormatter={(v) => fmt(v, true)} tick={{ fill: "#6b7280", fontSize: 10 }} axisLine={false} tickLine={false} width={64} />
+            <YAxis tickFormatter={(v) => fmt(v, true)} tick={{ fill: "#6b7280", fontSize: 10 }} axisLine={false} tickLine={false} width={68} />
             <Tooltip
               contentStyle={{ background: "#111827", border: "1px solid #374151", borderRadius: 8 }}
-              labelStyle={{ color: "#d1d5db" }}
+              labelStyle={{ color: "#d1d5db", marginBottom: 4 }}
               formatter={(v) => fmt(Number(v))}
             />
             <Legend wrapperStyle={{ fontSize: 11, color: "#9ca3af" }} />
-            <ReferenceLine y={0} stroke="#374151" />
-            <Bar dataKey="CA (N-1)" fill="#374151" radius={[2, 2, 0, 0]} />
-            <Bar dataKey="CA (N)" fill="#3b82f6" radius={[2, 2, 0, 0]} />
-            <Bar dataKey="Résultat (N)" fill="#10b981" radius={[2, 2, 0, 0]} />
-          </BarChart>
+            <ReferenceLine y={0} stroke="#374151" strokeDasharray="3 3" />
+            <Line dataKey="CA N-1 cumulé" stroke="#374151" strokeWidth={1.5} dot={false} strokeDasharray="4 3" connectNulls />
+            <Line dataKey="CA cumulé" stroke="#3b82f6" strokeWidth={2} dot={false} connectNulls />
+            <Line dataKey="Masse salariale" stroke="#f59e0b" strokeWidth={2} dot={false} connectNulls />
+            <Line dataKey="Charges externes" stroke="#8b5cf6" strokeWidth={2} dot={false} connectNulls />
+            <Line dataKey="EBE cumulé" stroke="#10b981" strokeWidth={2.5} dot={false} connectNulls />
+          </LineChart>
         </ResponsiveContainer>
       </div>
 
