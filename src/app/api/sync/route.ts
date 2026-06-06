@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchLedgerEntries, fetchEntryLabels } from "@/lib/pennylane";
+import { fetchLedgerEntries, fetchEntryLabels, fetchSupplierAccountLabels } from "@/lib/pennylane";
 import { prisma } from "@/lib/db";
 import { ensureSchema } from "@/lib/migrate";
 
@@ -29,9 +29,21 @@ export async function POST(req: Request) {
 
     const log = await prisma.syncLog.create({ data: {} });
     const { start, end } = getFiscalYears();
-    const entryLabels = await fetchEntryLabels(start, end);
+    const [entryLabels, supplierLabels] = await Promise.all([
+      fetchEntryLabels(start, end),
+      fetchSupplierAccountLabels(),
+    ]);
     await new Promise((r) => setTimeout(r, 1000));
     const lines = await fetchLedgerEntries(start, end);
+
+    // Upsert supplier account labels (401xxx → nom fournisseur)
+    for (const [number, label] of supplierLabels) {
+      await prisma.$executeRaw`
+        INSERT INTO "LedgerAccount" ("number", "label")
+        VALUES (${number}, ${label})
+        ON CONFLICT ("number") DO UPDATE SET "label" = ${label}
+      `;
+    }
 
     let upserted = 0;
     const BATCH = 50;

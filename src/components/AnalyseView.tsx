@@ -14,7 +14,8 @@ const ResponsiveContainer = dynamic(() => import("recharts").then((m) => m.Respo
 const ReferenceLine = dynamic(() => import("recharts").then((m) => m.ReferenceLine), { ssr: false });
 
 interface Supplier {
-  key: string;
+  key: string;    // compte 401xxx
+  label: string;  // nom du fournisseur
   total: number;
   category: string | null;
 }
@@ -143,7 +144,7 @@ export default function AnalyseView() {
               <tbody>
                 {suppliers.map((s) => (
                   <tr key={s.key} className="border-b border-gray-800/50 hover:bg-gray-800/30">
-                    <td className="py-2 text-gray-200 pr-4 max-w-xs truncate" title={s.key}>{s.key}</td>
+                    <td className="py-2 text-gray-200 pr-4 max-w-xs truncate" title={s.label}>{s.label}</td>
                     <td className="py-2 text-right text-gray-200 pr-6 tabular-nums whitespace-nowrap">{fmt(s.total)}</td>
                     <td className="py-2">
                       <select

@@ -40,4 +40,10 @@ export async function ensureSchema() {
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "LedgerAccount" (
+      "number" TEXT PRIMARY KEY,
+      "label"  TEXT NOT NULL DEFAULT ''
+    )
+  `);
 }

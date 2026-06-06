@@ -2,13 +2,11 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { ensureSchema } from "@/lib/migrate";
 
-// Exercice fiscal courant oct→sep
 function fiscalStart() {
   const today = new Date();
   const y = today.getFullYear();
   const m = today.getMonth() + 1;
-  const fyStart = m >= 10 ? y : y - 1;
-  return `${fyStart}-10-01`;
+  return `${m >= 10 ? y : y - 1}-10-01`;
 }
 
 export async function GET() {
@@ -17,24 +15,26 @@ export async function GET() {
 
     const start = fiscalStart();
 
-    // Vrais fournisseurs = entries qui ont au moins une ligne 401xxx
-    // On récupère leurs entryLabels puis on somme les montants 6xx
-    const rows = await prisma.$queryRaw<{ entryLabel: string; total: number }[]>`
+    // Un fournisseur = un compte 401xxx unique
+    // Total = somme des montants 6xx des écritures où ce compte 401 apparaît
+    const rows = await prisma.$queryRaw<{ account: string; label: string; total: number }[]>`
       SELECT
-        l."entryLabel",
-        SUM(CASE WHEN l."accountNumber" LIKE '6%' THEN l."debit" - l."credit" ELSE 0 END)::float AS total
-      FROM "LedgerEntryLine" l
-      WHERE
-        l."entryLabel" != ''
-        AND l."date" >= ${start}::date
-        AND l."entryLabel" IN (
-          SELECT DISTINCT "entryLabel"
-          FROM "LedgerEntryLine"
-          WHERE "accountNumber" LIKE '401%'
-            AND "entryLabel" != ''
-        )
-      GROUP BY l."entryLabel"
-      HAVING SUM(CASE WHEN l."accountNumber" LIKE '6%' THEN l."debit" - l."credit" ELSE 0 END) > 0
+        l401."accountNumber"                                          AS account,
+        COALESCE(la."label", l401."accountNumber")                    AS label,
+        SUM(CASE WHEN l6."accountNumber" LIKE '6%'
+                 THEN l6."debit" - l6."credit" ELSE 0 END)::float    AS total
+      FROM "LedgerEntryLine" l401
+      JOIN "LedgerEntryLine" l6
+        ON  l401."entryLabel" = l6."entryLabel"
+        AND l401."entryLabel" != ''
+      LEFT JOIN "LedgerAccount" la
+        ON  la."number" = l401."accountNumber"
+      WHERE l401."accountNumber" LIKE '401%'
+        AND l6."accountNumber"   LIKE '6%'
+        AND l401."date" >= ${start}::date
+      GROUP BY l401."accountNumber", la."label"
+      HAVING SUM(CASE WHEN l6."accountNumber" LIKE '6%'
+                      THEN l6."debit" - l6."credit" ELSE 0 END) > 0
       ORDER BY total DESC
     `;
 
@@ -44,9 +44,10 @@ export async function GET() {
     const catMap = new Map(categories.map((c) => [c.key, c.category]));
 
     const result = rows.map((r) => ({
-      key: r.entryLabel,
+      key: r.account,          // compte 401xxx — clé de catégorisation
+      label: r.label,          // nom lisible du fournisseur
       total: Number(r.total),
-      category: catMap.get(r.entryLabel) ?? null,
+      category: catMap.get(r.account) ?? null,
     }));
 
     return NextResponse.json(result);

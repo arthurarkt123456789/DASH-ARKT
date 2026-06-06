@@ -113,6 +113,37 @@ export async function fetchEntryLabels(
   return labels;
 }
 
+// ─── Fetch 401xxx account labels (nom des fournisseurs) ───────────────────────
+
+interface LedgerAccountsResponse {
+  items: { id: number; number: string; label: string }[];
+  has_more: boolean;
+  next_cursor: string | null;
+}
+
+export async function fetchSupplierAccountLabels(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  let cursor: string | undefined;
+
+  while (true) {
+    const params: Record<string, string> = { limit: "100" };
+    if (cursor) params["cursor"] = cursor;
+
+    const data = await fetchPennylane<LedgerAccountsResponse>("/ledger_accounts", params);
+    for (const item of data.items) {
+      if (item.number.startsWith("401")) {
+        map.set(item.number, item.label);
+      }
+    }
+
+    if (!data.has_more || !data.next_cursor) break;
+    cursor = data.next_cursor;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  return map;
+}
+
 // ─── P&L categorisation (Plan Comptable Général) ──────────────────────────────
 
 export type PnLCategory =
