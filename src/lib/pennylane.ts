@@ -116,6 +116,17 @@ function categorize(num: string): PnLCategory {
 
 // ─── Build P&L ────────────────────────────────────────────────────────────────
 
+export interface MonthlyPnL {
+  month: string; // "YYYY-MM"
+  ca: number;
+  achats_charges_ext: number;
+  charges_personnel: number;
+  total_produits: number;
+  total_charges: number;
+  ebe: number;
+  resultat_exploitation: number;
+}
+
 export interface PnLReport {
   period: { start: string; end: string };
   ca: number;
@@ -127,6 +138,7 @@ export interface PnLReport {
   dotations_amort: number;
   autres_charges: number;
   total_charges: number;
+  ebe: number;
   resultat_exploitation: number;
   produits_financiers: number;
   charges_financieres: number;
@@ -135,12 +147,21 @@ export interface PnLReport {
   charges_except: number;
   resultat_exceptionnel: number;
   impot_societes: number;
+  is_estime: number;
   resultat_net: number;
   lines: { accountNumber: string; category: PnLCategory; amount: number }[];
+  monthly: MonthlyPnL[];
+}
+
+function estimateIS(resultatAvantIS: number): number {
+  if (resultatAvantIS <= 0) return 0;
+  if (resultatAvantIS <= 42500) return resultatAvantIS * 0.15;
+  return 42500 * 0.15 + (resultatAvantIS - 42500) * 0.25;
 }
 
 export function buildPnL(entries: LedgerEntryLine[], start: string, end: string): PnLReport {
   const lineMap = new Map<string, { category: PnLCategory; amount: number }>();
+  const monthMap = new Map<string, { ca: number; achats_charges_ext: number; charges_personnel: number; impots_taxes: number; dotations_amort: number; autres_charges: number; autres_produits: number }>();
 
   for (const entry of entries) {
     const num = entry.ledger_account.number;
@@ -149,21 +170,26 @@ export function buildPnL(entries: LedgerEntryLine[], start: string, end: string)
 
     const debit = parseFloat(entry.debit) || 0;
     const credit = parseFloat(entry.credit) || 0;
-
-    // Revenue (7xx): net = credit - debit
-    // Expense (6xx): net = debit - credit
     const isRevenue = num.startsWith("7");
     const amount = isRevenue ? credit - debit : debit - credit;
 
     if (!lineMap.has(num)) lineMap.set(num, { category: cat, amount: 0 });
     lineMap.get(num)!.amount += amount;
+
+    // Monthly grouping (exploitation only)
+    const month = entry.date.slice(0, 7);
+    if (!monthMap.has(month)) monthMap.set(month, { ca: 0, achats_charges_ext: 0, charges_personnel: 0, impots_taxes: 0, dotations_amort: 0, autres_charges: 0, autres_produits: 0 });
+    const m = monthMap.get(month)!;
+    if (cat === "ca") m.ca += amount;
+    else if (cat === "autres_produits_exploit") m.autres_produits += amount;
+    else if (cat === "achats_charges_ext") m.achats_charges_ext += amount;
+    else if (cat === "impots_taxes") m.impots_taxes += amount;
+    else if (cat === "charges_personnel") m.charges_personnel += amount;
+    else if (cat === "dotations_amort") m.dotations_amort += amount;
+    else if (cat === "autres_charges_exploit") m.autres_charges += amount;
   }
 
-  const lines = Array.from(lineMap.entries()).map(([accountNumber, v]) => ({
-    accountNumber,
-    ...v,
-  }));
-
+  const lines = Array.from(lineMap.entries()).map(([accountNumber, v]) => ({ accountNumber, ...v }));
   const sum = (...cats: PnLCategory[]) =>
     lines.filter((l) => cats.includes(l.category)).reduce((a, l) => a + l.amount, 0);
 
@@ -178,6 +204,9 @@ export function buildPnL(entries: LedgerEntryLine[], start: string, end: string)
   const autres_charges = sum("autres_charges_exploit");
   const total_charges = achats_charges_ext + impots_taxes + charges_personnel + dotations_amort + autres_charges;
 
+  // EBE = CA + autres produits - charges externes - impôts - personnel (hors amort)
+  const ebe = ca + autres_produits - achats_charges_ext - impots_taxes - charges_personnel;
+
   const resultat_exploitation = total_produits - total_charges;
 
   const produits_financiers = sum("produits_financiers");
@@ -189,16 +218,38 @@ export function buildPnL(entries: LedgerEntryLine[], start: string, end: string)
   const resultat_exceptionnel = produits_except - charges_except;
 
   const impot_societes = sum("impot_societes");
-  const resultat_net = resultat_exploitation + resultat_financier + resultat_exceptionnel - impot_societes;
+  const resultat_avant_is = resultat_exploitation + resultat_financier + resultat_exceptionnel;
+  const is_estime = impot_societes === 0 ? estimateIS(resultat_avant_is) : impot_societes;
+  const resultat_net = resultat_avant_is - impot_societes;
+
+  // Build sorted monthly array
+  const monthly: MonthlyPnL[] = Array.from(monthMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, m]) => {
+      const tp = m.ca + m.autres_produits;
+      const tc = m.achats_charges_ext + m.impots_taxes + m.charges_personnel + m.dotations_amort + m.autres_charges;
+      return {
+        month,
+        ca: m.ca,
+        achats_charges_ext: m.achats_charges_ext,
+        charges_personnel: m.charges_personnel,
+        total_produits: tp,
+        total_charges: tc,
+        ebe: m.ca + m.autres_produits - m.achats_charges_ext - m.impots_taxes - m.charges_personnel,
+        resultat_exploitation: tp - tc,
+      };
+    });
 
   return {
     period: { start, end },
     ca, autres_produits, total_produits,
     achats_charges_ext, impots_taxes, charges_personnel, dotations_amort, autres_charges, total_charges,
+    ebe,
     resultat_exploitation,
     produits_financiers, charges_financieres, resultat_financier,
     produits_except, charges_except, resultat_exceptionnel,
-    impot_societes, resultat_net,
+    impot_societes, is_estime, resultat_net,
     lines,
+    monthly,
   };
 }
