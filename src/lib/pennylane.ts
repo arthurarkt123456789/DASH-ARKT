@@ -34,6 +34,8 @@ export interface LedgerEntryLine {
   debit: string;
   credit: string;
   date: string;
+  created_at: string;
+  updated_at: string;
   ledger_account: {
     id: number;
     number: string;

@@ -1,24 +1,16 @@
 import { NextResponse } from "next/server";
-import { fetchLedgerEntries, buildPnL } from "@/lib/pennylane";
+import { prisma } from "@/lib/db";
+import { buildPnL } from "@/lib/pennylane";
+import type { LedgerEntryLine } from "@/lib/pennylane";
 
-// Exercice fiscal ARKT : 1er octobre → 30 septembre
 function getFiscalYears() {
   const today = new Date();
   const year = today.getFullYear();
-  const month = today.getMonth() + 1; // 1-indexed
-
-  // Si on est avant octobre, l'exercice en cours a commencé l'année civile précédente
-  const currentFYStart = month >= 10 ? year : year - 1;
-
+  const month = today.getMonth() + 1;
+  const fyStart = month >= 10 ? year : year - 1;
   return {
-    current: {
-      start: `${currentFYStart}-10-01`,
-      end: `${currentFYStart + 1}-09-30`,
-    },
-    previous: {
-      start: `${currentFYStart - 1}-10-01`,
-      end: `${currentFYStart}-09-30`,
-    },
+    current: { start: `${fyStart}-10-01`, end: `${fyStart + 1}-09-30` },
+    previous: { start: `${fyStart - 1}-10-01`, end: `${fyStart}-09-30` },
   };
 }
 
@@ -26,21 +18,45 @@ export async function GET() {
   try {
     const { current, previous } = getFiscalYears();
 
-    const [currentEntries, previousEntries] = await Promise.all([
-      fetchLedgerEntries(current.start, current.end),
-      fetchLedgerEntries(previous.start, previous.end),
+    const toLines = (rows: { id: bigint; label: string; debit: number; credit: number; date: Date; accountNumber: string }[]): LedgerEntryLine[] =>
+      rows.map((r) => ({
+        id: Number(r.id),
+        label: r.label,
+        debit: String(r.debit),
+        credit: String(r.credit),
+        date: r.date.toISOString().slice(0, 10),
+        created_at: "",
+        updated_at: "",
+        ledger_account: { id: 0, number: r.accountNumber, url: "" },
+      }));
+
+    const [currentRows, previousRows, lastSync] = await Promise.all([
+      prisma.ledgerEntryLine.findMany({
+        where: { date: { gte: new Date(current.start), lte: new Date(current.end) } },
+        select: { id: true, label: true, debit: true, credit: true, date: true, accountNumber: true },
+      }),
+      prisma.ledgerEntryLine.findMany({
+        where: { date: { gte: new Date(previous.start), lte: new Date(previous.end) } },
+        select: { id: true, label: true, debit: true, credit: true, date: true, accountNumber: true },
+      }),
+      prisma.syncLog.findFirst({
+        where: { finishedAt: { not: null }, error: null },
+        orderBy: { finishedAt: "desc" },
+        select: { finishedAt: true, linesUpserted: true },
+      }),
     ]);
 
-    const currentPnL = buildPnL(currentEntries, current.start, current.end);
-    const previousPnL = buildPnL(previousEntries, previous.start, previous.end);
+    if (currentRows.length === 0 && previousRows.length === 0) {
+      return NextResponse.json({ error: "Aucune donnée en base. Lance /api/sync d'abord." }, { status: 404 });
+    }
 
     return NextResponse.json({
-      current: currentPnL,
-      previous: previousPnL,
-      fetchedAt: new Date().toISOString(),
+      current: buildPnL(toLines(currentRows), current.start, current.end),
+      previous: buildPnL(toLines(previousRows), previous.start, previous.end),
+      lastSync,
     });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
