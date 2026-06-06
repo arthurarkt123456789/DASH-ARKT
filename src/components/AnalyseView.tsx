@@ -15,8 +15,8 @@ const ReferenceLine = dynamic(() => import("recharts").then((m) => m.ReferenceLi
 
 interface Supplier {
   key: string;
+  total: number;
   category: string | null;
-  accounts: string[];
 }
 
 const CATEGORY_OPTIONS = [
@@ -115,75 +115,51 @@ export default function AnalyseView() {
     })
     .filter((d) => d.hasData);
 
-  // Group suppliers by category
-  const grouped: Record<string, Supplier[]> = { cogs: [], charges_dirigeant: [], charges_ext: [], "": [] };
-  for (const s of suppliers) {
-    const cat = s.category ?? "";
-    if (!(cat in grouped)) grouped[cat] = [];
-    grouped[cat].push(s);
-  }
-  const groupOrder: { key: string; label: string }[] = [
-    { key: "cogs", label: "COGS" },
-    { key: "charges_dirigeant", label: "Charges Dirigeant" },
-    { key: "charges_ext", label: "Charges Externes" },
-    { key: "", label: "Non catégorisé" },
-  ];
+  // Fournisseurs déjà triés par total décroissant (server-side)
+  const totalAll = suppliers.reduce((a, s) => a + s.total, 0);
 
   return (
     <div className="space-y-8">
       {/* ── Supplier categorisation ── */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
-        <h3 className="text-sm font-semibold text-gray-300 mb-1">Catégorisation des fournisseurs</h3>
-        <p className="text-xs text-gray-500 mb-4">Associez chaque fournisseur à une catégorie pour affiner l&apos;analyse</p>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-sm font-semibold text-gray-300">Fournisseurs — exercice en cours</h3>
+          <span className="text-xs text-gray-500">{suppliers.length} fournisseur{suppliers.length > 1 ? "s" : ""} · {fmt(totalAll)}</span>
+        </div>
+        <p className="text-xs text-gray-500 mb-4">Trié par montant décroissant · Non catégorisé = Charges Externes par défaut</p>
 
         {suppliers.length === 0 ? (
-          <p className="text-gray-500 text-sm">Aucun fournisseur trouvé (lancez une sync d&apos;abord)</p>
+          <p className="text-gray-500 text-sm">Aucun fournisseur trouvé — lancez une sync depuis l&apos;onglet Annuel</p>
         ) : (
-          <div className="space-y-6">
-            {groupOrder.map(({ key, label }) => {
-              const group = grouped[key] ?? [];
-              if (group.length === 0) return null;
-              return (
-                <div key={key}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{label}</span>
-                    <div className="flex-1 h-px bg-gray-800" />
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="text-gray-500 border-b border-gray-800">
-                          <th className="text-left py-2 font-medium">Fournisseur</th>
-                          <th className="text-left py-2 font-medium">Comptes</th>
-                          <th className="text-left py-2 font-medium">Catégorie</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {group.map((s) => (
-                          <tr key={s.key} className="border-b border-gray-800/50">
-                            <td className="py-2 text-gray-200 pr-4">{s.key}</td>
-                            <td className="py-2 text-gray-500 pr-4">{s.accounts.join(", ")}</td>
-                            <td className="py-2">
-                              <select
-                                value={s.category ?? ""}
-                                onChange={(e) => handleCategoryChange(s.key, e.target.value)}
-                                className="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-blue-500"
-                              >
-                                {CATEGORY_OPTIONS.map((opt) => (
-                                  <option key={opt.value} value={opt.value}>
-                                    {opt.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </td>
-                          </tr>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-gray-500 border-b border-gray-800">
+                  <th className="text-left py-2 font-medium w-full">Fournisseur</th>
+                  <th className="text-right py-2 font-medium pr-6 whitespace-nowrap">Total HT</th>
+                  <th className="text-left py-2 font-medium whitespace-nowrap">Catégorie</th>
+                </tr>
+              </thead>
+              <tbody>
+                {suppliers.map((s) => (
+                  <tr key={s.key} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                    <td className="py-2 text-gray-200 pr-4 max-w-xs truncate" title={s.key}>{s.key}</td>
+                    <td className="py-2 text-right text-gray-200 pr-6 tabular-nums whitespace-nowrap">{fmt(s.total)}</td>
+                    <td className="py-2">
+                      <select
+                        value={s.category ?? ""}
+                        onChange={(e) => handleCategoryChange(s.key, e.target.value)}
+                        className="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-blue-500"
+                      >
+                        {CATEGORY_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              );
-            })}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
