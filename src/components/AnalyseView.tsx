@@ -64,15 +64,24 @@ export default function AnalyseView() {
       .finally(() => setLoading(false));
   }, []);
 
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   async function handleCategoryChange(key: string, category: string) {
     setSuppliers((prev) =>
       prev.map((s) => (s.key === key ? { ...s, category: category || null } : s))
     );
-    await fetch("/api/suppliers", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key, category }),
-    });
+    try {
+      const res = await fetch("/api/suppliers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, category }),
+      });
+      const d = await res.json();
+      if (!res.ok || d.error) setSaveError(d.error ?? `Erreur ${res.status}`);
+      else setSaveError(null);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e));
+    }
   }
 
   if (loading) {
@@ -127,7 +136,8 @@ export default function AnalyseView() {
           <h3 className="text-sm font-semibold text-gray-300">Fournisseurs — exercice en cours</h3>
           <span className="text-xs text-gray-500">{suppliers.length} fournisseur{suppliers.length > 1 ? "s" : ""} · {fmt(totalAll)}</span>
         </div>
-        <p className="text-xs text-gray-500 mb-4">Trié par montant décroissant · Non catégorisé = Charges Externes par défaut</p>
+        <p className="text-xs text-gray-500 mb-2">Trié par montant décroissant · Non catégorisé = Charges Externes par défaut</p>
+        {saveError && <p className="text-xs text-red-400 mb-3 font-mono bg-red-950/30 px-3 py-2 rounded">{saveError}</p>}
 
         {suppliers.length === 0 ? (
           <p className="text-gray-500 text-sm">Aucun fournisseur trouvé — lancez une sync depuis l&apos;onglet Annuel</p>

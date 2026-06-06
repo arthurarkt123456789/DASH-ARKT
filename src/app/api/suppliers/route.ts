@@ -15,27 +15,39 @@ export async function GET() {
 
     const start = fiscalStart();
 
-    // Un fournisseur = un compte 401xxx unique
-    // Total = somme des montants 6xx des écritures où ce compte 401 apparaît
+    // Étape 1 : pour chaque compte 401xxx, récupère les entryLabels distincts
+    // Étape 2 : pour chaque entryLabel, somme les lignes 6xx UNE SEULE FOIS (SUM sur lignes distinctes)
+    // L'agrégation se fait sur les lignes 6xx directement, pas via JOIN (évite les doublons)
     const rows = await prisma.$queryRaw<{ account: string; label: string; total: number }[]>`
       SELECT
-        l401."accountNumber"                                          AS account,
-        COALESCE(la."label", l401."accountNumber")                    AS label,
-        SUM(CASE WHEN l6."accountNumber" LIKE '6%'
-                 THEN l6."debit" - l6."credit" ELSE 0 END)::float    AS total
-      FROM "LedgerEntryLine" l401
-      JOIN "LedgerEntryLine" l6
-        ON  l401."entryLabel" = l6."entryLabel"
-        AND l401."entryLabel" != ''
-      LEFT JOIN "LedgerAccount" la
-        ON  la."number" = l401."accountNumber"
-      WHERE l401."accountNumber" LIKE '401%'
-        AND l6."accountNumber"   LIKE '6%'
-        AND l401."date" >= ${start}::date
-      GROUP BY l401."accountNumber", la."label"
-      HAVING SUM(CASE WHEN l6."accountNumber" LIKE '6%'
-                      THEN l6."debit" - l6."credit" ELSE 0 END) > 0
-      ORDER BY total DESC
+        sub."account",
+        COALESCE(la."label", sub."account") AS label,
+        sub.total::float                    AS total
+      FROM (
+        SELECT
+          l401."accountNumber"                                       AS account,
+          SUM(l6."debit" - l6."credit")                             AS total
+        FROM (
+          -- un compte 401 par entryLabel distinct
+          SELECT DISTINCT "accountNumber", "entryLabel"
+          FROM "LedgerEntryLine"
+          WHERE "accountNumber" LIKE '401%'
+            AND "entryLabel" != ''
+            AND "date" >= ${start}::date
+        ) l401
+        -- lignes 6xx de ces écritures (chaque ligne 6xx comptée une seule fois)
+        JOIN (
+          SELECT DISTINCT id, "entryLabel", "debit", "credit"
+          FROM "LedgerEntryLine"
+          WHERE "accountNumber" LIKE '6%'
+            AND "entryLabel" != ''
+            AND "date" >= ${start}::date
+        ) l6 ON l6."entryLabel" = l401."entryLabel"
+        GROUP BY l401."accountNumber"
+        HAVING SUM(l6."debit" - l6."credit") > 0
+      ) sub
+      LEFT JOIN "LedgerAccount" la ON la."number" = sub."account"
+      ORDER BY sub.total DESC
     `;
 
     const categories = await prisma.$queryRaw<{ key: string; category: string }[]>`
@@ -43,14 +55,14 @@ export async function GET() {
     `;
     const catMap = new Map(categories.map((c) => [c.key, c.category]));
 
-    const result = rows.map((r) => ({
-      key: r.account,          // compte 401xxx — clé de catégorisation
-      label: r.label,          // nom lisible du fournisseur
-      total: Number(r.total),
-      category: catMap.get(r.account) ?? null,
-    }));
-
-    return NextResponse.json(result);
+    return NextResponse.json(
+      rows.map((r) => ({
+        key: r.account,
+        label: r.label,
+        total: Number(r.total),
+        category: catMap.get(r.account) ?? null,
+      }))
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });
