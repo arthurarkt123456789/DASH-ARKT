@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchLedgerEntries } from "@/lib/pennylane";
+import { fetchLedgerEntries, fetchEntryLabels } from "@/lib/pennylane";
 import { prisma } from "@/lib/db";
 import { ensureSchema } from "@/lib/migrate";
 
@@ -29,6 +29,8 @@ export async function POST(req: Request) {
 
     const log = await prisma.syncLog.create({ data: {} });
     const { start, end } = getFiscalYears();
+    const entryLabels = await fetchEntryLabels(start, end);
+    await new Promise((r) => setTimeout(r, 1000));
     const lines = await fetchLedgerEntries(start, end);
 
     let upserted = 0;
@@ -43,12 +45,14 @@ export async function POST(req: Request) {
               debit: parseFloat(l.debit),
               credit: parseFloat(l.credit),
               label: l.label ?? "",
+              entryLabel: entryLabels.get(l.ledger_entry.id) ?? "",
               updatedAt: new Date(l.updated_at),
               syncedAt: new Date(),
             },
             create: {
               id: BigInt(l.id),
               label: l.label ?? "",
+              entryLabel: entryLabels.get(l.ledger_entry.id) ?? "",
               debit: parseFloat(l.debit),
               credit: parseFloat(l.credit),
               date: new Date(l.date),

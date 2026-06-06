@@ -29,4 +29,15 @@ export async function ensureSchema() {
   await prisma.$executeRawUnsafe(
     `CREATE INDEX IF NOT EXISTS "idx_ledger_account" ON "LedgerEntryLine"("accountNumber")`
   );
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "LedgerEntryLine" ADD COLUMN IF NOT EXISTS "entryLabel" TEXT NOT NULL DEFAULT ''`
+  );
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "SupplierCategory" (
+      "id"        SERIAL PRIMARY KEY,
+      "key"       TEXT NOT NULL UNIQUE,
+      "category"  TEXT NOT NULL,
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
 }

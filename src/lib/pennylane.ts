@@ -41,6 +41,13 @@ export interface LedgerEntryLine {
     number: string;
     url: string;
   };
+  ledger_entry: { id: number };
+}
+
+interface LedgerEntriesListResponse {
+  items: { id: number; label: string }[];
+  has_more: boolean;
+  next_cursor: string | null;
 }
 
 interface LedgerEntryLinesResponse {
@@ -74,6 +81,36 @@ export async function fetchLedgerEntries(
   }
 
   return lines;
+}
+
+// ─── Fetch all ledger entry labels for a date range (cursor pagination) ───────
+
+export async function fetchEntryLabels(
+  startDate: string,
+  endDate: string
+): Promise<Map<number, string>> {
+  const labels = new Map<number, string>();
+  let cursor: string | undefined;
+
+  while (true) {
+    const params: Record<string, string> = {
+      date_from: startDate,
+      date_to: endDate,
+      limit: "100",
+    };
+    if (cursor) params["cursor"] = cursor;
+
+    const data = await fetchPennylane<LedgerEntriesListResponse>("/ledger_entries", params);
+    for (const item of data.items) {
+      labels.set(item.id, item.label);
+    }
+
+    if (!data.has_more || !data.next_cursor) break;
+    cursor = data.next_cursor;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  return labels;
 }
 
 // ─── P&L categorisation (Plan Comptable Général) ──────────────────────────────

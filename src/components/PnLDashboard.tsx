@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import type { PnLReport, MonthlyPnL } from "@/lib/pennylane";
+import AnalyseView from "@/components/AnalyseView";
 
 const LineChart = dynamic(() => import("recharts").then((m) => m.LineChart), { ssr: false });
 const Line = dynamic(() => import("recharts").then((m) => m.Line), { ssr: false });
@@ -167,7 +168,7 @@ export default function PnLDashboard() {
   const [data, setData] = useState<PnLData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"annual" | "monthly">("annual");
+  const [view, setView] = useState<"annual" | "monthly" | "analyse">("annual");
 
   useEffect(() => {
     fetch("/api/pnl")
@@ -190,10 +191,10 @@ export default function PnLDashboard() {
     <div className="space-y-6">
       {/* Toggle */}
       <div className="flex items-center gap-2">
-        {(["annual", "monthly"] as const).map((v) => (
+        {(["annual", "monthly", "analyse"] as const).map((v) => (
           <button key={v} onClick={() => setView(v)}
             className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${view === v ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-gray-200"}`}>
-            {v === "annual" ? "Annuel" : "Mensuel"}
+            {v === "annual" ? "Annuel" : v === "monthly" ? "Mensuel" : "Analyse"}
           </button>
         ))}
       </div>
@@ -215,6 +216,8 @@ export default function PnLDashboard() {
       </div>
 
       {view === "monthly" && <MonthlyChart current={current.monthly} previous={previous.monthly} />}
+
+      {view === "analyse" && <AnalyseView />}
 
       {view === "annual" && (
         <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">

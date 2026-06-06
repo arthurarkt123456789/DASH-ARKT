@@ -30,6 +30,7 @@ export async function GET() {
         created_at: "",
         updated_at: "",
         ledger_account: { id: 0, number: r.accountNumber, url: "" },
+        ledger_entry: { id: 0 },
       }));
 
     const [currentRows, previousRows, lastSync] = await Promise.all([
