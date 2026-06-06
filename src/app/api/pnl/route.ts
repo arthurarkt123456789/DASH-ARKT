@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { buildPnL } from "@/lib/pennylane";
 import type { LedgerEntryLine } from "@/lib/pennylane";
+import { ensureSchema } from "@/lib/migrate";
 
 function getFiscalYears() {
   const today = new Date();
@@ -16,6 +17,7 @@ function getFiscalYears() {
 
 export async function GET() {
   try {
+    await ensureSchema();
     const { current, previous } = getFiscalYears();
 
     const toLines = (rows: { id: bigint; label: string; debit: number; credit: number; date: Date; accountNumber: string }[]): LedgerEntryLine[] =>
