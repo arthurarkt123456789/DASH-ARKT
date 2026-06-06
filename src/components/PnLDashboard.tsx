@@ -169,6 +169,29 @@ export default function PnLDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"annual" | "monthly" | "analyse">("annual");
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+
+  async function runSync() {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const res = await fetch("/api/sync", { method: "POST" });
+      const d = await res.json();
+      if (d.error) {
+        setSyncMsg(`Erreur : ${d.error}`);
+      } else {
+        setSyncMsg(`✓ ${d.linesUpserted.toLocaleString("fr-FR")} lignes synchronisées`);
+        // Reload data
+        const pnl = await fetch("/api/pnl").then((r) => r.json());
+        if (!pnl.error) setData(pnl);
+      }
+    } catch (e) {
+      setSyncMsg(`Erreur : ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   useEffect(() => {
     fetch("/api/pnl")
@@ -189,14 +212,23 @@ export default function PnLDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Toggle */}
-      <div className="flex items-center gap-2">
-        {(["annual", "monthly", "analyse"] as const).map((v) => (
-          <button key={v} onClick={() => setView(v)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${view === v ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-gray-200"}`}>
-            {v === "annual" ? "Annuel" : v === "monthly" ? "Mensuel" : "Analyse"}
+      {/* Toggle + Sync */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {(["annual", "monthly", "analyse"] as const).map((v) => (
+            <button key={v} onClick={() => setView(v)}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${view === v ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-gray-200"}`}>
+              {v === "annual" ? "Annuel" : v === "monthly" ? "Mensuel" : "Analyse"}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-3">
+          {syncMsg && <span className={`text-xs ${syncMsg.startsWith("✓") ? "text-green-400" : "text-red-400"}`}>{syncMsg}</span>}
+          <button onClick={runSync} disabled={syncing}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-800 text-gray-400 hover:text-gray-200 disabled:opacity-50 transition-colors">
+            {syncing ? "Synchronisation…" : "↻ Synchroniser"}
           </button>
-        ))}
+        </div>
       </div>
 
       {/* KPIs */}
