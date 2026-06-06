@@ -10,7 +10,9 @@ function getHeaders() {
   };
 }
 
-async function fetchPennylane<T>(path: string, params?: Record<string, string>): Promise<T> {
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function fetchPennylane<T>(path: string, params?: Record<string, string>, retries = 4): Promise<T> {
   const url = new URL(`${BASE_URL}${path}`);
   if (params) {
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -19,6 +21,11 @@ async function fetchPennylane<T>(path: string, params?: Record<string, string>):
     headers: getHeaders(),
     next: { revalidate: 900 },
   });
+  if (res.status === 429 && retries > 0) {
+    const retryAfter = parseInt(res.headers.get("retry-after") ?? "2", 10);
+    await delay((retryAfter + 1) * 1000);
+    return fetchPennylane<T>(path, params, retries - 1);
+  }
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`Pennylane API error ${res.status}: ${body}`);

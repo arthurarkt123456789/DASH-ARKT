@@ -29,11 +29,10 @@ export async function POST(req: Request) {
 
     const log = await prisma.syncLog.create({ data: {} });
     const { start, end } = getFiscalYears();
-    const [entryLabels, supplierLabels] = await Promise.all([
-      fetchEntryLabels(start, end),
-      fetchSupplierAccountLabels(),
-    ]);
-    await new Promise((r) => setTimeout(r, 1000));
+    const entryLabels = await fetchEntryLabels(start, end);
+    await new Promise((r) => setTimeout(r, 2000));
+    const supplierLabels = await fetchSupplierAccountLabels();
+    await new Promise((r) => setTimeout(r, 2000));
     const lines = await fetchLedgerEntries(start, end);
 
     // Upsert supplier account labels (401xxx → nom fournisseur)
