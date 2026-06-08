@@ -157,6 +157,31 @@ export default function AnalyseView() {
     });
   }, [currentMap, previousMap, mmToFull, mmToFullPrev, cogsSuppKeys, dirigeantsSuppKeys, supplierMonthly, previousSupplierMonthly]);
 
+  // ── Données mensuelles brutes (non cumulées) ────────────────────────────────
+  const monthlyChartData = useMemo(() => {
+    return adjustedMonthly
+      .filter((m) => m.hasData || m.hasPrevData)
+      .map((m) => {
+        const point: Record<string, string | number | null> = {
+          month: m.label,
+          "Masse salariale": m.hasData ? Math.round(m.charges_personnel) : null,
+          "Charges externes": m.hasData ? Math.round(m.charges_ext_adj) : null,
+          "EBE": m.hasData ? Math.round(m.ebe_adj) : null,
+        };
+        if (hasCogs) {
+          point["Marge"] = m.hasData ? Math.round(m.marge) : null;
+          point["Marge N-1"] = m.hasPrevData ? Math.round(m.marge_n1) : null;
+        } else {
+          point["CA"] = m.hasData ? Math.round(m.ca) : null;
+          point["CA N-1"] = m.hasPrevData ? Math.round(m.ca_n1) : null;
+        }
+        if (hasDirigeants) {
+          point["Charges dirigeants"] = m.hasData ? Math.round(m.charges_dirigeants) : null;
+        }
+        return point;
+      });
+  }, [adjustedMonthly, hasCogs, hasDirigeants]);
+
   // ── Données cumulées pour le graphique ──────────────────────────────────────
   const chartData = useMemo(() => {
     let cumCA = 0, cumMarge = 0, cumPersonnel = 0, cumChargesExt = 0;
@@ -315,6 +340,49 @@ export default function AnalyseView() {
                 ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* ── Graphique mensuel (non cumulé) ── */}
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+        <h3 className="text-sm font-semibold text-gray-300 mb-1">Vue mensuelle — exercice en cours</h3>
+        <p className="text-xs text-gray-500 mb-4">Valeurs mois par mois (non cumulées)</p>
+        <div style={{ height: 300 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={monthlyChartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <XAxis dataKey="month" tick={{ fill: "#6b7280", fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis
+                tickFormatter={(v) => fmt(v, true)}
+                tick={{ fill: "#6b7280", fontSize: 10 }}
+                axisLine={false}
+                tickLine={false}
+                width={68}
+              />
+              <Tooltip
+                contentStyle={{ background: "#111827", border: "1px solid #374151", borderRadius: 8 }}
+                labelStyle={{ color: "#d1d5db", marginBottom: 4 }}
+                formatter={(v) => fmt(Number(v))}
+              />
+              <Legend wrapperStyle={{ fontSize: 11, color: "#9ca3af" }} />
+              <ReferenceLine y={0} stroke="#374151" strokeDasharray="3 3" />
+              {hasCogs
+                ? <>
+                    <Line dataKey="Marge" stroke="#3b82f6" strokeWidth={2} dot={false} connectNulls />
+                    <Line dataKey="Marge N-1" stroke="#374151" strokeWidth={1.5} dot={false} strokeDasharray="4 3" connectNulls />
+                  </>
+                : <>
+                    <Line dataKey="CA" stroke="#3b82f6" strokeWidth={2} dot={false} connectNulls />
+                    <Line dataKey="CA N-1" stroke="#374151" strokeWidth={1.5} dot={false} strokeDasharray="4 3" connectNulls />
+                  </>
+              }
+              <Line dataKey="Masse salariale" stroke="#f59e0b" strokeWidth={2} dot={false} connectNulls />
+              <Line dataKey="Charges externes" stroke="#8b5cf6" strokeWidth={2} dot={false} connectNulls />
+              {hasDirigeants && (
+                <Line dataKey="Charges dirigeants" stroke="#f97316" strokeWidth={2} dot={false} connectNulls />
+              )}
+              <Line dataKey="EBE" stroke="#10b981" strokeWidth={2.5} dot={false} connectNulls />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       </div>
 
