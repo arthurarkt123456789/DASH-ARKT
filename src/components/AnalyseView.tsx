@@ -48,6 +48,7 @@ export default function AnalyseView() {
   const [currentMonthly, setCurrentMonthly] = useState<MonthlyPnL[]>([]);
   const [previousMonthly, setPreviousMonthly] = useState<MonthlyPnL[]>([]);
   const [supplierMonthly, setSupplierMonthly] = useState<Record<string, Record<string, number>>>({});
+  const [previousSupplierMonthly, setPreviousSupplierMonthly] = useState<Record<string, Record<string, number>>>({});
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +65,7 @@ export default function AnalyseView() {
         setCurrentMonthly(detailData.currentMonthly ?? []);
         setPreviousMonthly(detailData.previousMonthly ?? []);
         setSupplierMonthly(detailData.supplierMonthly ?? {});
+        setPreviousSupplierMonthly(detailData.previousSupplierMonthly ?? {});
         setSuppliers(suppliersData);
       })
       .catch((e) => setError(e.message))
@@ -108,10 +110,14 @@ export default function AnalyseView() {
     () => Object.fromEntries(previousMonthly.map((m) => [m.month.slice(5, 7), m])),
     [previousMonthly]
   );
-  // MM → "YYYY-MM" pour chercher dans supplierMonthly
+  // MM → "YYYY-MM" pour chercher dans supplierMonthly (N et N-1)
   const mmToFull = useMemo(
     () => Object.fromEntries(currentMonthly.map((m) => [m.month.slice(5, 7), m.month])),
     [currentMonthly]
+  );
+  const mmToFullPrev = useMemo(
+    () => Object.fromEntries(previousMonthly.map((m) => [m.month.slice(5, 7), m.month])),
+    [previousMonthly]
   );
 
   // ── Données mensuelles ajustées ─────────────────────────────────────────────
@@ -120,12 +126,16 @@ export default function AnalyseView() {
       const cur = currentMap[mm];
       const prev = previousMap[mm];
       const fullMonth = mmToFull[mm];
+      const fullMonthPrev = mmToFullPrev[mm];
 
       const cogsAmt = fullMonth
         ? Array.from(cogsSuppKeys).reduce((s, k) => s + (supplierMonthly[k]?.[fullMonth] ?? 0), 0)
         : 0;
       const dirigeantsAmt = fullMonth
         ? Array.from(dirigeantsSuppKeys).reduce((s, k) => s + (supplierMonthly[k]?.[fullMonth] ?? 0), 0)
+        : 0;
+      const cogsAmtN1 = fullMonthPrev
+        ? Array.from(cogsSuppKeys).reduce((s, k) => s + (previousSupplierMonthly[k]?.[fullMonthPrev] ?? 0), 0)
         : 0;
 
       return {
@@ -135,6 +145,7 @@ export default function AnalyseView() {
         hasPrevData: !!prev,
         ca: cur?.ca ?? 0,
         ca_n1: prev?.ca ?? 0,
+        marge_n1: (prev?.ca ?? 0) - cogsAmtN1,
         charges_personnel: cur?.charges_personnel ?? 0,
         // EBE ajusté : les charges dirigeants sont exclues du calcul
         ebe_adj: cur ? cur.ebe + dirigeantsAmt : 0,
@@ -144,12 +155,12 @@ export default function AnalyseView() {
         marge: (cur?.ca ?? 0) - cogsAmt,
       };
     });
-  }, [currentMap, previousMap, mmToFull, cogsSuppKeys, dirigeantsSuppKeys, supplierMonthly]);
+  }, [currentMap, previousMap, mmToFull, mmToFullPrev, cogsSuppKeys, dirigeantsSuppKeys, supplierMonthly, previousSupplierMonthly]);
 
   // ── Données cumulées pour le graphique ──────────────────────────────────────
   const chartData = useMemo(() => {
     let cumCA = 0, cumMarge = 0, cumPersonnel = 0, cumChargesExt = 0;
-    let cumDirigeants = 0, cumEBE = 0, cumCAN1 = 0;
+    let cumDirigeants = 0, cumEBE = 0, cumCAN1 = 0, cumMargeN1 = 0;
 
     return adjustedMonthly
       .map((m) => {
@@ -161,11 +172,13 @@ export default function AnalyseView() {
           cumDirigeants += m.charges_dirigeants;
           cumEBE += m.ebe_adj;
         }
-        if (m.hasPrevData) cumCAN1 += m.ca_n1;
+        if (m.hasPrevData) {
+          cumCAN1 += m.ca_n1;
+          cumMargeN1 += m.marge_n1;
+        }
 
         const point: Record<string, string | number | null> = {
           month: m.label,
-          "CA N-1 cumulé": m.hasPrevData ? Math.round(cumCAN1) : null,
           "Masse salariale": m.hasData ? Math.round(cumPersonnel) : null,
           "Charges externes": m.hasData ? Math.round(cumChargesExt) : null,
           "EBE cumulé": m.hasData ? Math.round(cumEBE) : null,
@@ -173,8 +186,10 @@ export default function AnalyseView() {
 
         if (hasCogs) {
           point["Marge cumulée"] = m.hasData ? Math.round(cumMarge) : null;
+          point["Marge N-1 cumulée"] = m.hasPrevData ? Math.round(cumMargeN1) : null;
         } else {
           point["CA cumulé"] = m.hasData ? Math.round(cumCA) : null;
+          point["CA N-1 cumulé"] = m.hasPrevData ? Math.round(cumCAN1) : null;
         }
 
         if (hasDirigeants) {
@@ -230,10 +245,15 @@ export default function AnalyseView() {
               />
               <Legend wrapperStyle={{ fontSize: 11, color: "#9ca3af" }} />
               <ReferenceLine y={0} stroke="#374151" strokeDasharray="3 3" />
-              <Line dataKey="CA N-1 cumulé" stroke="#374151" strokeWidth={1.5} dot={false} strokeDasharray="4 3" connectNulls />
               {hasCogs
-                ? <Line dataKey="Marge cumulée" stroke="#3b82f6" strokeWidth={2} dot={false} connectNulls />
-                : <Line dataKey="CA cumulé" stroke="#3b82f6" strokeWidth={2} dot={false} connectNulls />
+                ? <>
+                    <Line dataKey="Marge cumulée" stroke="#3b82f6" strokeWidth={2} dot={false} connectNulls />
+                    <Line dataKey="Marge N-1 cumulée" stroke="#374151" strokeWidth={1.5} dot={false} strokeDasharray="4 3" connectNulls />
+                  </>
+                : <>
+                    <Line dataKey="CA cumulé" stroke="#3b82f6" strokeWidth={2} dot={false} connectNulls />
+                    <Line dataKey="CA N-1 cumulé" stroke="#374151" strokeWidth={1.5} dot={false} strokeDasharray="4 3" connectNulls />
+                  </>
               }
               <Line dataKey="Masse salariale" stroke="#f59e0b" strokeWidth={2} dot={false} connectNulls />
               <Line dataKey="Charges externes" stroke="#8b5cf6" strokeWidth={2} dot={false} connectNulls />
@@ -252,7 +272,7 @@ export default function AnalyseView() {
               <tr className="text-gray-500 border-b border-gray-800">
                 <th className="text-left py-2 font-medium">Mois</th>
                 <th className="text-right py-2 font-medium">{hasCogs ? "Marge" : "CA (N)"}</th>
-                <th className="text-right py-2 font-medium">CA (N-1)</th>
+                <th className="text-right py-2 font-medium">{hasCogs ? "Marge (N-1)" : "CA (N-1)"}</th>
                 {hasCogs && <th className="text-right py-2 font-medium">COGS</th>}
                 <th className="text-right py-2 font-medium">Charges ext</th>
                 {hasDirigeants && <th className="text-right py-2 font-medium">Ch. dirigeants</th>}
@@ -270,7 +290,7 @@ export default function AnalyseView() {
                       {m.hasData ? fmt(hasCogs ? m.marge : m.ca) : "—"}
                     </td>
                     <td className="py-1.5 text-right text-gray-500">
-                      {m.hasPrevData ? fmt(m.ca_n1) : "—"}
+                      {m.hasPrevData ? fmt(hasCogs ? m.marge_n1 : m.ca_n1) : "—"}
                     </td>
                     {hasCogs && (
                       <td className="py-1.5 text-right text-gray-400">

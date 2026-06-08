@@ -41,7 +41,32 @@ export async function GET() {
     const prevStartDate = new Date(previous.start);
     const prevEndDate = new Date(previous.end);
 
-    const [currentRows, previousRows, supplierRows] = await Promise.all([
+    const supplierMonthlyQuery = (from: Date, to: Date) => prisma.$queryRaw<{ supplier_key: string; month: string; amount: number }[]>`
+      SELECT
+        l401."accountNumber"                                         AS supplier_key,
+        TO_CHAR(DATE_TRUNC('month', l6."date"), 'YYYY-MM')          AS month,
+        SUM(l6."debit" - l6."credit")::float                        AS amount
+      FROM (
+        SELECT DISTINCT "accountNumber", "entryLabel"
+        FROM "LedgerEntryLine"
+        WHERE "accountNumber" LIKE '401%'
+          AND "entryLabel" != ''
+          AND "date" >= ${from}::date
+          AND "date" <= ${to}::date
+      ) l401
+      JOIN (
+        SELECT DISTINCT id, "entryLabel", "debit", "credit", "date"
+        FROM "LedgerEntryLine"
+        WHERE ("accountNumber" LIKE '60%' OR "accountNumber" LIKE '61%' OR "accountNumber" LIKE '62%')
+          AND "entryLabel" != ''
+          AND "date" >= ${from}::date
+          AND "date" <= ${to}::date
+      ) l6 ON l6."entryLabel" = l401."entryLabel"
+      GROUP BY l401."accountNumber", DATE_TRUNC('month', l6."date")
+      HAVING SUM(l6."debit" - l6."credit") > 0
+    `;
+
+    const [currentRows, previousRows, supplierRows, prevSupplierRows] = await Promise.all([
       prisma.ledgerEntryLine.findMany({
         where: { date: { gte: startDate, lte: endDate } },
         select: { id: true, label: true, debit: true, credit: true, date: true, accountNumber: true },
@@ -50,47 +75,27 @@ export async function GET() {
         where: { date: { gte: prevStartDate, lte: prevEndDate } },
         select: { id: true, label: true, debit: true, credit: true, date: true, accountNumber: true },
       }),
-      // Per-supplier per-month amounts for 6xx charges (excl. 64xx personnel)
-      prisma.$queryRaw<{ supplier_key: string; month: string; amount: number }[]>`
-        SELECT
-          l401."accountNumber"                                         AS supplier_key,
-          TO_CHAR(DATE_TRUNC('month', l6."date"), 'YYYY-MM')          AS month,
-          SUM(l6."debit" - l6."credit")::float                        AS amount
-        FROM (
-          SELECT DISTINCT "accountNumber", "entryLabel"
-          FROM "LedgerEntryLine"
-          WHERE "accountNumber" LIKE '401%'
-            AND "entryLabel" != ''
-            AND "date" >= ${startDate}::date
-            AND "date" <= ${endDate}::date
-        ) l401
-        JOIN (
-          SELECT DISTINCT id, "entryLabel", "debit", "credit", "date"
-          FROM "LedgerEntryLine"
-          WHERE ("accountNumber" LIKE '60%' OR "accountNumber" LIKE '61%' OR "accountNumber" LIKE '62%')
-            AND "entryLabel" != ''
-            AND "date" >= ${startDate}::date
-            AND "date" <= ${endDate}::date
-        ) l6 ON l6."entryLabel" = l401."entryLabel"
-        GROUP BY l401."accountNumber", DATE_TRUNC('month', l6."date")
-        HAVING SUM(l6."debit" - l6."credit") > 0
-      `,
+      supplierMonthlyQuery(startDate, endDate),
+      supplierMonthlyQuery(prevStartDate, prevEndDate),
     ]);
 
     const currentPnL = buildPnL(toLines(currentRows), current.start, current.end);
     const previousPnL = buildPnL(toLines(previousRows), previous.start, previous.end);
 
-    // Build { accountKey → { "YYYY-MM" → amount } }
-    const supplierMonthly: Record<string, Record<string, number>> = {};
-    for (const row of supplierRows) {
-      if (!supplierMonthly[row.supplier_key]) supplierMonthly[row.supplier_key] = {};
-      supplierMonthly[row.supplier_key][row.month] = Number(row.amount);
-    }
+    const buildSupplierMap = (rows: { supplier_key: string; month: string; amount: number }[]) => {
+      const map: Record<string, Record<string, number>> = {};
+      for (const row of rows) {
+        if (!map[row.supplier_key]) map[row.supplier_key] = {};
+        map[row.supplier_key][row.month] = Number(row.amount);
+      }
+      return map;
+    };
 
     return NextResponse.json({
       currentMonthly: currentPnL.monthly,
       previousMonthly: previousPnL.monthly,
-      supplierMonthly,
+      supplierMonthly: buildSupplierMap(supplierRows),
+      previousSupplierMonthly: buildSupplierMap(prevSupplierRows),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
