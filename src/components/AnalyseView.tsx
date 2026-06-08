@@ -5,7 +5,9 @@ import dynamic from "next/dynamic";
 import type { MonthlyPnL } from "@/lib/pennylane";
 
 const LineChart = dynamic(() => import("recharts").then((m) => m.LineChart), { ssr: false });
+const BarChart = dynamic(() => import("recharts").then((m) => m.BarChart), { ssr: false });
 const Line = dynamic(() => import("recharts").then((m) => m.Line), { ssr: false });
+const Bar = dynamic(() => import("recharts").then((m) => m.Bar), { ssr: false });
 const XAxis = dynamic(() => import("recharts").then((m) => m.XAxis), { ssr: false });
 const YAxis = dynamic(() => import("recharts").then((m) => m.YAxis), { ssr: false });
 const Tooltip = dynamic(() => import("recharts").then((m) => m.Tooltip), { ssr: false });
@@ -53,6 +55,7 @@ export default function AnalyseView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [detailMonth, setDetailMonth] = useState<string | null>(null); // "YYYY-MM"
 
   useEffect(() => {
     Promise.all([
@@ -118,6 +121,11 @@ export default function AnalyseView() {
   const mmToFullPrev = useMemo(
     () => Object.fromEntries(previousMonthly.map((m) => [m.month.slice(5, 7), m.month])),
     [previousMonthly]
+  );
+  // label ("Oct") → "YYYY-MM" pour le détail au clic
+  const labelToFull = useMemo(
+    () => Object.fromEntries(FISCAL_MONTHS.map((mm) => [MONTH_LABELS[mm], mmToFull[mm]]).filter(([, v]) => v)),
+    [mmToFull]
   );
 
   // ── Données mensuelles ajustées ─────────────────────────────────────────────
@@ -343,13 +351,15 @@ export default function AnalyseView() {
         </div>
       </div>
 
-      {/* ── Graphique mensuel (non cumulé) ── */}
+      {/* ── Graphique mensuel (barres, non cumulé) ── */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
         <h3 className="text-sm font-semibold text-gray-300 mb-1">Vue mensuelle — exercice en cours</h3>
-        <p className="text-xs text-gray-500 mb-4">Valeurs mois par mois (non cumulées)</p>
+        <p className="text-xs text-gray-500 mb-4">
+          Valeurs mois par mois · <span className="text-purple-400">cliquer sur Charges ext ou Charges dirigeants</span> pour voir le détail fournisseurs
+        </p>
         <div style={{ height: 300 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={monthlyChartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+            <BarChart data={monthlyChartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }} barCategoryGap="20%">
               <XAxis dataKey="month" tick={{ fill: "#6b7280", fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis
                 tickFormatter={(v) => fmt(v, true)}
@@ -367,23 +377,119 @@ export default function AnalyseView() {
               <ReferenceLine y={0} stroke="#374151" strokeDasharray="3 3" />
               {hasCogs
                 ? <>
-                    <Line dataKey="Marge" stroke="#3b82f6" strokeWidth={2} dot={false} connectNulls />
-                    <Line dataKey="Marge N-1" stroke="#374151" strokeWidth={1.5} dot={false} strokeDasharray="4 3" connectNulls />
+                    <Bar dataKey="Marge" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="Marge N-1" fill="#374151" radius={[3, 3, 0, 0]} />
                   </>
                 : <>
-                    <Line dataKey="CA" stroke="#3b82f6" strokeWidth={2} dot={false} connectNulls />
-                    <Line dataKey="CA N-1" stroke="#374151" strokeWidth={1.5} dot={false} strokeDasharray="4 3" connectNulls />
+                    <Bar dataKey="CA" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="CA N-1" fill="#374151" radius={[3, 3, 0, 0]} />
                   </>
               }
-              <Line dataKey="Masse salariale" stroke="#f59e0b" strokeWidth={2} dot={false} connectNulls />
-              <Line dataKey="Charges externes" stroke="#8b5cf6" strokeWidth={2} dot={false} connectNulls />
+              <Bar dataKey="Masse salariale" fill="#f59e0b" radius={[3, 3, 0, 0]} />
+              <Bar
+                dataKey="Charges externes"
+                fill="#8b5cf6"
+                radius={[3, 3, 0, 0]}
+                cursor="pointer"
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                onClick={(d: any) => {
+                  const full = labelToFull[d?.month as string];
+                  if (full) setDetailMonth((prev) => (prev === full ? null : full));
+                }}
+              />
               {hasDirigeants && (
-                <Line dataKey="Charges dirigeants" stroke="#f97316" strokeWidth={2} dot={false} connectNulls />
+                <Bar
+                  dataKey="Charges dirigeants"
+                  fill="#f97316"
+                  radius={[3, 3, 0, 0]}
+                  cursor="pointer"
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                onClick={(d: any) => {
+                    const full = labelToFull[d?.month as string];
+                    if (full) setDetailMonth((prev) => (prev === full ? null : full));
+                  }}
+                />
               )}
-              <Line dataKey="EBE" stroke="#10b981" strokeWidth={2.5} dot={false} connectNulls />
-            </LineChart>
+              <Bar dataKey="EBE" fill="#10b981" radius={[3, 3, 0, 0]} />
+            </BarChart>
           </ResponsiveContainer>
         </div>
+
+        {/* ── Panneau détail fournisseurs au clic ── */}
+        {detailMonth && (() => {
+          const monthLabel = MONTH_LABELS[detailMonth.slice(5, 7)];
+          const suppliersByCategory = suppliers
+            .map((s) => ({
+              ...s,
+              amount: supplierMonthly[s.key]?.[detailMonth] ?? 0,
+            }))
+            .filter((s) => s.amount > 0)
+            .sort((a, b) => b.amount - a.amount);
+
+          const cogsItems = suppliersByCategory.filter((s) => s.category === "cogs");
+          const dirigeantsItems = suppliersByCategory.filter((s) => s.category === "charges_dirigeant");
+          const extItems = suppliersByCategory.filter((s) => s.category !== "cogs" && s.category !== "charges_dirigeant");
+
+          return (
+            <div className="mt-4 border border-gray-700 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-xs font-semibold text-gray-300">Détail charges — {monthLabel}</h4>
+                <button onClick={() => setDetailMonth(null)} className="text-gray-500 hover:text-gray-300 text-xs">✕ fermer</button>
+              </div>
+              {suppliersByCategory.length === 0 ? (
+                <p className="text-xs text-gray-500">Aucun fournisseur identifié ce mois</p>
+              ) : (
+                <div className="space-y-3">
+                  {extItems.length > 0 && (
+                    <div>
+                      <p className="text-xs text-purple-400 font-medium mb-1">Charges externes</p>
+                      <table className="w-full text-xs">
+                        <tbody>
+                          {extItems.map((s) => (
+                            <tr key={s.key} className="border-b border-gray-800/50">
+                              <td className="py-1 text-gray-300 pr-4 max-w-xs truncate" title={s.label}>{s.label}</td>
+                              <td className="py-1 text-right text-gray-200 tabular-nums">{fmt(s.amount)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  {cogsItems.length > 0 && (
+                    <div>
+                      <p className="text-xs text-blue-400 font-medium mb-1">COGS</p>
+                      <table className="w-full text-xs">
+                        <tbody>
+                          {cogsItems.map((s) => (
+                            <tr key={s.key} className="border-b border-gray-800/50">
+                              <td className="py-1 text-gray-300 pr-4 max-w-xs truncate" title={s.label}>{s.label}</td>
+                              <td className="py-1 text-right text-gray-200 tabular-nums">{fmt(s.amount)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  {dirigeantsItems.length > 0 && (
+                    <div>
+                      <p className="text-xs text-orange-400 font-medium mb-1">Charges dirigeants</p>
+                      <table className="w-full text-xs">
+                        <tbody>
+                          {dirigeantsItems.map((s) => (
+                            <tr key={s.key} className="border-b border-gray-800/50">
+                              <td className="py-1 text-gray-300 pr-4 max-w-xs truncate" title={s.label}>{s.label}</td>
+                              <td className="py-1 text-right text-gray-200 tabular-nums">{fmt(s.amount)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* ── Fournisseurs — catégorisation ── */}
