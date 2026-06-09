@@ -46,4 +46,12 @@ export async function ensureSchema() {
       "label"  TEXT NOT NULL DEFAULT ''
     )
   `);
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "EntryCategory" (
+      "id"        SERIAL PRIMARY KEY,
+      "key"       TEXT NOT NULL UNIQUE,
+      "category"  TEXT NOT NULL,
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
 }

@@ -30,7 +30,52 @@ const toLines = (
     ledger_entry: { id: 0 },
   }));
 
-// Returns monthly PnL data + per-supplier per-month 6xx amounts for client-side recalculation
+interface EntryRow {
+  supplier_key: string;
+  supplier_label: string;
+  entry_label: string;
+  month: string;
+  amount: number;
+}
+
+// Per-invoice (entryLabel) per-month 6xx amounts, with supplier name
+const entryQuery = (from: Date, to: Date) =>
+  prisma.$queryRaw<EntryRow[]>`
+    SELECT
+      l401."accountNumber"                                        AS supplier_key,
+      COALESCE(la."label", l401."accountNumber")                  AS supplier_label,
+      l401."entryLabel"                                           AS entry_label,
+      TO_CHAR(DATE_TRUNC('month', l6."date"), 'YYYY-MM')         AS month,
+      SUM(l6."debit" - l6."credit")::float                       AS amount
+    FROM (
+      SELECT DISTINCT "accountNumber", "entryLabel"
+      FROM "LedgerEntryLine"
+      WHERE "accountNumber" LIKE '401%'
+        AND "entryLabel" != ''
+        AND "date" >= ${from}::date
+        AND "date" <= ${to}::date
+    ) l401
+    LEFT JOIN "LedgerAccount" la ON la."number" = l401."accountNumber"
+    JOIN "LedgerEntryLine" l6
+      ON l6."entryLabel" = l401."entryLabel"
+      AND (l6."accountNumber" LIKE '60%' OR l6."accountNumber" LIKE '61%' OR l6."accountNumber" LIKE '62%')
+      AND l6."date" >= ${from}::date
+      AND l6."date" <= ${to}::date
+    GROUP BY l401."accountNumber", la."label", l401."entryLabel", DATE_TRUNC('month', l6."date")
+    HAVING SUM(l6."debit" - l6."credit") > 0
+  `;
+
+function buildEntryMap(rows: EntryRow[]) {
+  const map: Record<string, { supplierKey: string; supplierLabel: string; months: Record<string, number> }> = {};
+  for (const row of rows) {
+    if (!map[row.entry_label]) {
+      map[row.entry_label] = { supplierKey: row.supplier_key, supplierLabel: row.supplier_label, months: {} };
+    }
+    map[row.entry_label].months[row.month] = Number(row.amount);
+  }
+  return map;
+}
+
 export async function GET() {
   try {
     await ensureSchema();
@@ -41,32 +86,7 @@ export async function GET() {
     const prevStartDate = new Date(previous.start);
     const prevEndDate = new Date(previous.end);
 
-    const supplierMonthlyQuery = (from: Date, to: Date) => prisma.$queryRaw<{ supplier_key: string; month: string; amount: number }[]>`
-      SELECT
-        l401."accountNumber"                                         AS supplier_key,
-        TO_CHAR(DATE_TRUNC('month', l6."date"), 'YYYY-MM')          AS month,
-        SUM(l6."debit" - l6."credit")::float                        AS amount
-      FROM (
-        SELECT DISTINCT "accountNumber", "entryLabel"
-        FROM "LedgerEntryLine"
-        WHERE "accountNumber" LIKE '401%'
-          AND "entryLabel" != ''
-          AND "date" >= ${from}::date
-          AND "date" <= ${to}::date
-      ) l401
-      JOIN (
-        SELECT DISTINCT id, "entryLabel", "debit", "credit", "date"
-        FROM "LedgerEntryLine"
-        WHERE ("accountNumber" LIKE '60%' OR "accountNumber" LIKE '61%' OR "accountNumber" LIKE '62%')
-          AND "entryLabel" != ''
-          AND "date" >= ${from}::date
-          AND "date" <= ${to}::date
-      ) l6 ON l6."entryLabel" = l401."entryLabel"
-      GROUP BY l401."accountNumber", DATE_TRUNC('month', l6."date")
-      HAVING SUM(l6."debit" - l6."credit") > 0
-    `;
-
-    const [currentRows, previousRows, supplierRows, prevSupplierRows] = await Promise.all([
+    const [currentRows, previousRows, entryRows, prevEntryRows, categoryRows] = await Promise.all([
       prisma.ledgerEntryLine.findMany({
         where: { date: { gte: startDate, lte: endDate } },
         select: { id: true, label: true, debit: true, credit: true, date: true, accountNumber: true },
@@ -75,27 +95,20 @@ export async function GET() {
         where: { date: { gte: prevStartDate, lte: prevEndDate } },
         select: { id: true, label: true, debit: true, credit: true, date: true, accountNumber: true },
       }),
-      supplierMonthlyQuery(startDate, endDate),
-      supplierMonthlyQuery(prevStartDate, prevEndDate),
+      entryQuery(startDate, endDate),
+      entryQuery(prevStartDate, prevEndDate),
+      prisma.$queryRaw<{ key: string; category: string }[]>`SELECT "key", "category" FROM "EntryCategory"`,
     ]);
 
-    const currentPnL = buildPnL(toLines(currentRows), current.start, current.end);
-    const previousPnL = buildPnL(toLines(previousRows), previous.start, previous.end);
-
-    const buildSupplierMap = (rows: { supplier_key: string; month: string; amount: number }[]) => {
-      const map: Record<string, Record<string, number>> = {};
-      for (const row of rows) {
-        if (!map[row.supplier_key]) map[row.supplier_key] = {};
-        map[row.supplier_key][row.month] = Number(row.amount);
-      }
-      return map;
-    };
+    const categories: Record<string, string> = {};
+    for (const row of categoryRows) categories[row.key] = row.category;
 
     return NextResponse.json({
-      currentMonthly: currentPnL.monthly,
-      previousMonthly: previousPnL.monthly,
-      supplierMonthly: buildSupplierMap(supplierRows),
-      previousSupplierMonthly: buildSupplierMap(prevSupplierRows),
+      currentMonthly: buildPnL(toLines(currentRows), current.start, current.end).monthly,
+      previousMonthly: buildPnL(toLines(previousRows), previous.start, previous.end).monthly,
+      entries: buildEntryMap(entryRows),
+      previousEntries: buildEntryMap(prevEntryRows),
+      categories,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
